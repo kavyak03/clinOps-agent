@@ -1,0 +1,45 @@
+{
+  "n_patients": 200,
+  "n_labs": 778,
+  "n_notes": 778,
+  "missingness_patients": {
+    "patient_id": 0.0,
+    "age": 0.0,
+    "sex": 0.0,
+    "bmi": 0.0,
+    "smoker": 0.0,
+    "htn": 0.0,
+    "t2d": 0.0,
+    "ckd": 0.0,
+    "hld": 0.0
+  },
+  "missingness_labs": {
+    "patient_id": 0.0,
+    "encounter_id": 0.0,
+    "date": 0.0,
+    "a1c": 0.0,
+    "ldl": 0.0,
+    "creatinine": 0.0,
+    "egfr": 0.0
+  },
+  "missingness_notes": {
+    "patient_id": 0.0,
+    "encounter_id": 0.0,
+    "date": 0.0,
+    "note_text": 0.0
+  },
+  "lab_ranges": {
+    "a1c_min": 4.2,
+    "a1c_max": 8.520332410989257,
+    "egfr_min": 47.564863481393765,
+    "egfr_max": 140.0,
+    "ldl_min": 40.0,
+    "ldl_max": 217.1755231090919,
+    "creatinine_min": 0.4,
+    "creatinine_max": 2.1023922425240977
+  },
+  "dup_encounters_labs": 0,
+  "dup_encounters_notes": 0,
+  "note_len_mean": 204.0835475578406,
+  "note_len_p95": 221.14999999999998
+}

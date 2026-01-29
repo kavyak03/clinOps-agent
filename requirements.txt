@@ -1,0 +1,10 @@
+numpy==1.26.4
+pandas
+pyyaml
+matplotlib
+scikit-learn
+faiss-cpu
+sentence-transformers
+tiktoken
+requests
+datasets==2.20.0

@@ -1,0 +1,5 @@
+{"question_id": "Q1", "question": "What A1c range is considered prediabetes?", "gold_doc_ids": ["GL_DIAB_001", "LAB_A1C_REF"]}
+{"question_id": "Q2", "question": "When should metformin be avoided based on eGFR?", "gold_doc_ids": ["GL_DIAB_010", "LAB_EGFR_REF"]}
+{"question_id": "Q3", "question": "What statin intensity is recommended when LDL is at least 190 mg/dL?", "gold_doc_ids": ["GL_LIP_001", "LAB_LDL_REF"]}
+{"question_id": "Q4", "question": "How often should A1c be measured when glycemic control is stable?", "gold_doc_ids": ["GL_DIAB_011"]}
+{"question_id": "Q5", "question": "What eGFR range suggests moderate reduction in kidney function?", "gold_doc_ids": ["LAB_EGFR_REF", "GL_CKD_002"]}
