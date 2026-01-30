@@ -1,13 +1,9 @@
-# Python
+# virtual environments
+.venv/
+.venv-clinrag/
+env/
+venv/
+
+# python junk
 __pycache__/
 *.pyc
-.venv/
-.env
-
-# Data outputs
-data/processed/
-reports/
-
-# OS / editor
-.DS_Store
-.vscode/
