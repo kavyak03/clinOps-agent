@@ -1,0 +1,5 @@
+# Optional: LangChain + LangGraph prototypes (not required for core repo).
+langchain>=0.2.10
+langchain-community>=0.2.10
+langchain-core>=0.2.10
+langgraph>=0.2.30

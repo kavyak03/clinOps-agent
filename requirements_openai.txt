@@ -1,0 +1,2 @@
+# Optional: OpenAI API integration
+openai>=1.0.0

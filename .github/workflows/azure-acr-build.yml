@@ -1,0 +1,59 @@
+name: Build and Push Docker image to Azure Container Registry (ACR)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_push_acr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Auth option A (simple): Service Principal JSON in AZURE_CREDENTIALS
+      # Create it with:
+      #   az ad sp create-for-rbac --name "clinrag-gh-actions" --role contributor \
+      #     --scopes /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RG> \
+      #     --sdk-auth
+      # Then add the JSON output as GitHub Secret: AZURE_CREDENTIALS
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # You must set these GitHub repo Variables (Settings -> Secrets and variables -> Actions -> Variables):
+      #   ACR_NAME        e.g. acrclinrag12345
+      #   IMAGE_REPO      e.g. clinrag
+      # Optional variables:
+      #   ACR_RESOURCE_GROUP (only needed if your SP is scoped narrowly and you need it here)
+      - name: Build and push image using ACR Cloud Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ACR_NAME:-}" ]; then echo "Missing variable ACR_NAME"; exit 1; fi
+          if [ -z "${IMAGE_REPO:-}" ]; then echo "Missing variable IMAGE_REPO"; exit 1; fi
+
+          echo "ACR_NAME=$ACR_NAME"
+          echo "IMAGE_REPO=$IMAGE_REPO"
+
+          # Build in Azure and push tags: latest + git SHA
+          az acr build -r "$ACR_NAME"             -t "${IMAGE_REPO}:latest"             -t "${IMAGE_REPO}:${{ github.sha }}"             .
+
+      # Optional: also update your Azure Container App after pushing.
+      # Uncomment and set variables if you want auto-deploy on each push:
+      #
+      # - name: Deploy (optional) - update Azure Container App image
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     if [ -z "${CONTAINERAPP_NAME:-}" ] || [ -z "${RESOURCE_GROUP:-}" ]; then
+      #       echo "Set CONTAINERAPP_NAME and RESOURCE_GROUP repo variables to enable deploy."
+      #       exit 1
+      #     fi
+      #     IMG="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${{ github.sha }}"
+      #     az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --image "$IMG"

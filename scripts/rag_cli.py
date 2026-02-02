@@ -7,6 +7,7 @@ from src.rag.embed import Embedder
 from src.rag.retrieve import retrieve
 from src.rag.generate import generate_answer_openai, generate_answer_offline_stub
 
+#Run build_index before running this script
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--question", type=str, required=True)

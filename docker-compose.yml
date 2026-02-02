@@ -1,0 +1,12 @@
+services:
+  clinrag:
+    build: .
+    container_name: clinrag
+    working_dir: /app
+    volumes:
+      # Mount your local data folder so indexes/corpora persist outside the container
+      - ./data:/app/data
+    environment:
+      # Optional: only needed if you run with --llm openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    command: ["python", "-m", "scripts.rag_cli", "--question", "Is metformin appropriate if eGFR is 35?"]

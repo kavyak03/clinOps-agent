@@ -1,9 +1,15 @@
-# virtual environments
+# venv
 .venv/
 .venv-clinrag/
 env/
-venv/
 
-# python junk
+# python
 __pycache__/
 *.pyc
+
+# data artifacts
+data/processed/
+*.faiss
+
+# git junk
+.git/
