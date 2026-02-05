@@ -1,145 +1,104 @@
 from __future__ import annotations
 
-import json
-import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
-def generate_answer_offline_stub(question: str, evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Deterministic, offline-safe generator.
+try:
+    # LangChain Document type (optional dependency)
+    from langchain_core.documents import Document
+except Exception:
+    Document = None  # type: ignore
 
-    Returns a structured JSON answer object without calling any external LLM.
-    Useful for reproducibility, CI, and environments where external calls are disallowed.
-    """
-    top = evidence[:3] if evidence else []
-    if not top:
+
+def _doc_to_evidence(d: Any, i: int) -> Dict[str, Any]:
+    """Normalize either a dict-like evidence or a LangChain Document into a dict evidence record."""
+    # Case 1: already a dict
+    if isinstance(d, dict):
+        ev = dict(d)
+        ev.setdefault("evidence_id", ev.get("doc_id", f"doc_{i}"))
+        ev.setdefault("title", ev.get("title", ev.get("doc_id", f"doc_{i}")))
+        ev.setdefault("text", ev.get("text") or ev.get("chunk") or ev.get("content") or "")
+        return ev
+
+    # Case 2: LangChain Document
+    if Document is not None and isinstance(d, Document):
+        meta = d.metadata or {}
         return {
-            "answer": "I couldn't find relevant evidence in the indexed corpus.",
-            "recommendations": [],
-            "citations": [],
-            "uncertainties": ["No evidence retrieved."],
+            "evidence_id": meta.get("evidence_id") or meta.get("doc_id") or f"doc_{i}",
+            "title": meta.get("title") or meta.get("doc_id") or f"doc_{i}",
+            "text": d.page_content,
+            "metadata": meta,
         }
 
-    bullets = []
-    citations = []
-    recs = []
-    for i, e in enumerate(top):
-        title = e.get("title") or e.get("doc_id", f"doc_{i}")
-        chunk = (e.get("chunk") or "").strip().replace("\n", " ")
-        snippet = chunk[:240] + ("..." if len(chunk) > 240 else "")
-        bullets.append(f"- {title}: {snippet}")
-        recs.append(title)
-        citations.append({"claim": title, "evidence_ids": [i]})
-
+    # Case 3: fallback
     return {
-        "answer": (
-            "Offline stub answer (no external LLM). Top supporting snippets:\n"
-            + "\n".join(bullets)
-        ),
-        "recommendations": recs,
-        "citations": citations,
-        "uncertainties": ["LLM disabled in offline demo; plug in an LLM provider for fluent answers."],
+        "evidence_id": f"doc_{i}",
+        "title": f"doc_{i}",
+        "text": str(d),
     }
 
 
-def generate_answer_openai(question: str, evidence: List[Dict[str, Any]], model: str = "gpt-4o-mini") -> Dict[str, Any]:
-    """OpenAI-backed generator.
+def generate_answer_offline_stub(question: str, evidence: List[Any]) -> Dict[str, Any]:
+    # Normalize evidence
+    ev = [_doc_to_evidence(e, i) for i, e in enumerate(evidence)]
 
-    Requires:
-      - pip install openai
-      - OPENAI_API_KEY set in environment
+    # Minimal, deterministic offline response
+    # (Keep this aligned with your repo’s JSON schema if you have one)
+    answer = {
+        "question": question,
+        "answer": "OFFLINE_STUB: This is a placeholder answer. Use llm='openai' for model-generated answers.",
+        "citations": [e["evidence_id"] for e in ev[:3]],
+        "evidence": ev[:5],
+    }
+    return answer
 
-    Note: API usage is separate from ChatGPT Plus.
+def generate_answer_openai(question: str, evidence, model: str = "gpt-4o-mini"):
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not set.\n"
-            "PowerShell:  $env:OPENAI_API_KEY='your_key_here'\n"
-            "macOS/Linux: export OPENAI_API_KEY='your_key_here'"
-        )
-
+    Optional OpenAI generator.
+    - Keeps the import available so prototypes don't crash.
+    - If openai deps/key aren't present, raises a clear error.
+    """
     try:
+        import os
         from openai import OpenAI
     except Exception as e:
         raise RuntimeError(
-            "OpenAI python package not installed. Install with: pip install openai\n"
-            f"Original error: {e}"
-        )
+            "OpenAI generator requested but OpenAI dependencies are not installed. "
+            "Install requirements_openai.txt and try again."
+        ) from e
 
-    # Keep prompt compact
-    formatted = []
-    for i, e in enumerate(evidence[:8] if evidence else []):
-        formatted.append(
-            {
-                "evidence_id": i,
-                "doc_id": e.get("doc_id"),
-                "title": e.get("title"),
-                "source": e.get("source"),
-                "chunk": (e.get("chunk") or "")[:1200],
-            }
-        )
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set.")
 
-    system = (
-        "You are a careful clinical assistant. Use ONLY the provided evidence. "
-        "If evidence is insufficient, say so. Do not invent facts.\n\n"
-        "Return STRICT JSON with keys: answer (string), recommendations (list[string]), "
-        "citations (list of {claim: string, evidence_ids: list[int]}), uncertainties (list[string]).\n"
-        "evidence_ids must refer to the evidence_id values provided."
-    )
+    # Normalize evidence into a readable string for the prompt
+    ev_texts = []
+    for i, d in enumerate(evidence):
+        if isinstance(d, dict):
+            title = d.get("title") or d.get("doc_id") or f"doc_{i}"
+            text = d.get("text") or ""
+        else:
+            # LangChain Document fallback
+            title = getattr(d, "metadata", {}) or {}
+            title = title.get("title") or title.get("doc_id") or f"doc_{i}"
+            text = getattr(d, "page_content", str(d))
+        ev_texts.append(f"[{i+1}] {title}\n{text}")
 
-    user_payload = {"question": question, "evidence": formatted}
+    prompt = f"""You are a careful clinical assistant.
+Answer the question using ONLY the evidence below.
+Return JSON with keys: answer, citations.
+
+Question: {question}
+
+Evidence:
+{'\n\n'.join(ev_texts)}
+"""
 
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(user_payload)},
-        ],
-        temperature=0.2,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
     )
-    content = resp.choices[0].message.content or ""
-    parsed = _safe_json_parse(content)
-    _validate_answer_schema(parsed)
-    return parsed
 
-
-def generate_answer(question: str, evidence: List[Dict[str, Any]], provider: str = "offline", **kwargs: Any) -> Dict[str, Any]:
-    """Unified entrypoint for generation.
-
-    provider:
-      - "offline": deterministic stub (default)
-      - "openai": OpenAI API call (requires billing/quota)
-    """
-    provider = (provider or "offline").lower()
-    if provider == "openai":
-        return generate_answer_openai(question, evidence, model=kwargs.get("model", "gpt-4o-mini"))
-    return generate_answer_offline_stub(question, evidence)
-
-
-def _safe_json_parse(text: str) -> Dict[str, Any]:
-    text = (text or "").strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start : end + 1])
-    raise RuntimeError("LLM did not return valid JSON. First 1200 chars:\n" + text[:1200])
-
-
-def _validate_answer_schema(obj: Dict[str, Any]) -> None:
-    if not isinstance(obj, dict):
-        raise RuntimeError("LLM output is not a JSON object.")
-    for k in ["answer", "recommendations", "citations", "uncertainties"]:
-        if k not in obj:
-            raise RuntimeError(f"LLM output missing key: {k}")
-    if not isinstance(obj["answer"], str):
-        raise RuntimeError("answer must be a string")
-    if not isinstance(obj["recommendations"], list):
-        raise RuntimeError("recommendations must be a list")
-    if not isinstance(obj["citations"], list):
-        raise RuntimeError("citations must be a list")
-    if not isinstance(obj["uncertainties"], list):
-        raise RuntimeError("uncertainties must be a list")
+    # Return raw text; your caller can json.loads if desired
+    return {"raw": resp.choices[0].message.content}

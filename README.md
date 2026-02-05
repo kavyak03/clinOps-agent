@@ -1,30 +1,54 @@
-# ClinRAG — Healthcare RAG with Synthetic Data + Public Corpora  
-**Bioinformatics × LLM Engineering × Reproducible Deployment**
+# ClinRAG — Healthcare RAG with Synthetic Data + Public Corpora
+**Bioinformatics × LLM Engineering**
 
-<!-- =======================
-BADGES (replace <...> once your repo path is final)
-======================= -->
-[![CI](https://github.com/<YOUR_GH_USERNAME>/<YOUR_REPO_NAME>/actions/workflows/ci.yml/badge.svg)](https://github.com/<YOUR_GH_USERNAME>/<YOUR_REPO_NAME>/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
+![Offline](https://img.shields.io/badge/offline-safe-success)
 
-ClinRAG is a **reproducible healthcare Retrieval-Augmented Generation (RAG) mini-system** showing how to build safer clinical LLM workflows:
+ClinRAG is a **reproducible healthcare Retrieval-Augmented Generation (RAG) mini-system** demonstrating how to build **grounded, auditable, and safe clinical LLM workflows** using **synthetic data** and **public corpora**.
 
-- Synthetic patient charts (no PHI)
-- Public corpora option (PubMedQA)
-- Embeddings + FAISS retrieval
-- Structured JSON outputs with citations
-- Faithfulness + grounding evaluation harness
-- Offline mode (no API calls required)
-- Docker + cloud-ready (Azure optional)
+The system is **offline-first by default** and supports optional LLM, orchestration, and cloud integrations.
 
 ---
 
-## 1‑minute quickstart (Docker — recommended)
+## What this repo demonstrates
 
-This is the path most recruiters / reviewers should use.  
-✅ No local Python headaches. ✅ Reproducible.
+- Synthetic patient charts (no PHI)
+- Public corpus option (PubMedQA)
+- Embeddings + FAISS retrieval
+- Structured JSON outputs with citations
+- Faithfulness + grounding evaluation harness
+- Offline-safe mode (no API calls required)
+- Dockerized, reproducible builds
+- Optional LangChain + LangGraph prototypes
+- Optional Azure cloud deployment
+
+---
+
+## ⭐ Recommended execution paths (important)
+
+There are **three supported ways** to run this repo. They are **for different usecases** — pick the one that fits your goal.
+
+### ✅ Path A — Docker (Recommended)
+- Fastest way to verify functionality
+- No Python dependency issues
+- FAISS index baked into the image
+- Ideal for reviewers and demos
+
+### ✅ Path B — Local Python via WSL (Windows) or native Linux/macOS
+- Best for development and debugging
+- Real `curl`, Linux-like behavior
+- Matches cloud + CI environments
+
+### ⚠️ Path C — Local Python via Windows PowerShell
+- Supported but more fragile
+- PowerShell aliases and quoting differences
+- Use only if WSL/Docker are unavailable
+
+---
+
+## 1-minute quickstart (Docker — recommended)
 
 ### Build (bakes PubMedQA + FAISS index into the image)
 ```bash
@@ -36,12 +60,36 @@ docker build -t clinrag:latest .
 docker run --rm -p 8080:8080 clinrag:latest
 ```
 
-### Test
+### Test (Linux / macOS / WSL)
 ```bash
-curl -s http://localhost:8080/health
+curl http://localhost:8080/health
 
-curl -s -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d "{"question":"Is metformin appropriate if eGFR is 35?","llm":"offline","k":5}"
+curl -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d '{"question":"Is metformin appropriate if eGFR is 35?","llm":"offline","k":5}'
 ```
+
+> **Windows PowerShell note**
+```powershell
+Invoke-RestMethod `
+  -Uri http://localhost:8080/ask `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body '{"question":"Is metformin appropriate if eGFR is 35?","llm":"offline","k":5}'
+```
+
+---
+
+## 🔹 Run RAG directly from the CLI (no API server)
+
+This runs the **same retrieval + generation logic** as the API, without starting FastAPI.
+
+### Docker (offline)
+```bash
+docker run --rm clinrag:latest   python -m scripts.rag_cli   --question "Is metformin appropriate if eGFR is 35?"
+```
+
+> **Note:** When using the Docker image **without volume mounts**, the FAISS index is already baked into the image at build time, so no local indexing step is required.
+
+This is the **fastest sanity check** for the core RAG pipeline.
 
 ---
 
@@ -49,100 +97,62 @@ curl -s -X POST http://localhost:8080/ask   -H "Content-Type: application/json" 
 
 Healthcare LLM systems must be:
 
-✅ grounded  
-✅ auditable  
-✅ reproducible  
-✅ safe against hallucinations  
+- grounded
+- auditable
+- reproducible
+- safe against hallucinations
 
-This repo demonstrates engineering patterns used in real systems:
-
+This repo demonstrates real engineering patterns:
 - retrieval over approved corpora only
-- answer must cite evidence
+- answers must cite evidence
 - strict structured output
 - offline fallback mode
-- evaluation harness for retrieval + faithfulness
+- explicit evaluation harness
 
 ---
 
 ## Repository structure
 
 ```
-app/                  FastAPI service (runtime entrypoint)
+app/                  FastAPI service
 src/                  core RAG + QC logic
 scripts/              CLIs (data/QC/index/demo/eval)
 prototypes/           LangChain + LangGraph demos
 data/
-  raw/                synthetic patients/notes (generated)
+  raw/                synthetic patients/notes
   corpora/             synthetic or public corpora
-  processed/           FAISS index + chunk metadata (generated or baked)
+  processed/           FAISS index + metadata
 reports/              evaluation outputs
-.github/workflows/     CI + optional Azure workflows
+.github/workflows/     CI workflows
 Dockerfile             reproducible container build
-docs/                  extra notes (optional)
+docs/                  extra notes
 ```
-
----
-
-## Demo GIF (optional but recommended)
-
-Add a short 10–20s screen recording of:
-
-1) `docker build ...`
-2) `docker run ...`
-3) `curl /ask ...`
-4) show JSON output
-
-Save it as:
-
-```
-docs/demo.gif
-```
-
-Then this link will render it:
-
-![ClinRAG demo](docs/demo.gif)
-
-> Tip: On Windows, you can record with Xbox Game Bar; on Mac use QuickTime. Export as GIF via an online converter or `ffmpeg`.
-
----
-
-## Screenshots (optional but recommended)
-
-Add a couple images for fast “scanability”:
-
-- `docs/screenshots/api_response.png` (example `/ask` response)
-- `docs/screenshots/eval_plots.png` (one combined plot collage or a single representative plot)
-
-Embed them:
-
-![API response](docs/screenshots/api_response.png)
-![Evaluation plots](docs/screenshots/eval_plots.png)
 
 ---
 
 ## OpenAI integration (optional)
 
-Offline mode is the default. If you want model-generated answers:
+Offline mode is the default.
 
 ### Set key
-**Windows PowerShell**
+**PowerShell**
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
 ```
 
-**macOS/Linux**
+**Linux / macOS / WSL**
 ```bash
 export OPENAI_API_KEY="sk-..."
 ```
 
 ### Run container with key
 ```bash
-docker run --rm -p 8080:8080 -e OPENAI_API_KEY=$OPENAI_API_KEY clinrag:latest
+docker run --rm -p 8080:8080   -e OPENAI_API_KEY=$OPENAI_API_KEY   clinrag:latest
 ```
 
-### Call with `llm=openai`
+Call with `llm=openai`:
 ```bash
-curl -s -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d "{"question":"Is metformin appropriate if eGFR is 35?","llm":"openai","k":5}"
+curl -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d '{"question":"Is metformin appropriate if eGFR is 35?","llm":"openai","k":5}'
 ```
 
 > OpenAI requires API billing/quota. Offline mode always works.
@@ -151,47 +161,39 @@ curl -s -X POST http://localhost:8080/ask   -H "Content-Type: application/json" 
 
 ## Optional: Local Python run (no Docker)
 
-Use this if you want VS Code native runs. **Python 3.11+ recommended**.
+### Windows users: use WSL (recommended)
 
-### 1) Create env
-**Windows PowerShell**
-```powershell
-py -3.11 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip setuptools wheel
-```
-
-**macOS/Linux**
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-```
-
-### 2) Install deps
-```bash
+pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
-pip install -r requirements_api.txt
 pip install -r requirements_langchain.txt
 pip install -r requirements_openai.txt
 ```
 
-### 3) Choose data mode
+### Choose data mode
 
-#### A) Synthetic mode (offline)
+#### Synthetic (offline)
 ```bash
 python -m scripts.make_data
 python -m scripts.run_qc
 python -m scripts.build_index
 ```
 
-#### B) Public PubMedQA mode (public + reproducible)
+#### Public PubMedQA
 ```bash
-python -m scripts.download_public_corpus_pubmedqa --config pqa_labeled --split train --max_examples 2000
-python -m scripts.build_index --corpus data/corpora/public/pubmedqa_corpus_singleline.jsonl
+python -m scripts.download_public_corpus_pubmedqa   --config pqa_labeled --split train --max_examples 2000
+
+python -m scripts.build_index   --corpus data/corpora/public/pubmedqa_corpus_singleline.jsonl
 ```
 
-### 4) Run API
+### Run RAG CLI locally (after indexing)
+```bash
+python -m scripts.rag_cli   --question "Is metformin appropriate if eGFR is 35?"
+```
+
+### Run API locally
 ```bash
 uvicorn app.api:app --host 0.0.0.0 --port 8080
 ```
@@ -200,58 +202,82 @@ uvicorn app.api:app --host 0.0.0.0 --port 8080
 
 ## Evaluation (offline + deterministic)
 
-### Retrieval evaluation
+### Local Python (fast iteration)
 ```bash
 python -m scripts.eval_retrieval
-```
-
-### Generation heuristics
-```bash
 python -m scripts.eval_generation_heuristics
-```
-
-### Strict faithfulness checks
-```bash
 python -m scripts.eval_faithfulness_strict
-```
-
-### Leaderboard
-```bash
 python -m scripts.make_leaderboard
 ```
 
-Outputs go to `reports/`.
+### Run eval inside Docker (recommended for reviewers)
+Evaluation scripts run **batch metrics** by executing the retrieval/generation pipeline programmatically. They **do not require** the API server (`curl`) to be running.
+
+```bash
+docker run --rm clinrag:latest python -m scripts.eval_retrieval
+docker run --rm clinrag:latest python -m scripts.eval_generation_heuristics
+docker run --rm clinrag:latest python -m scripts.eval_faithfulness_strict
+docker run --rm clinrag:latest python -m scripts.make_leaderboard
+```
+
+### Save evaluation outputs to your machine (mount `reports/`)
+If you want `reports/*.json` and `reports/*.csv` to appear on your host machine, mount the `reports/` folder.
+
+**WSL / Linux / macOS**
+```bash
+mkdir -p reports
+
+docker run --rm   -v "$(pwd)/reports:/app/reports"   clinrag:latest python -m scripts.eval_retrieval
+
+docker run --rm   -v "$(pwd)/reports:/app/reports"   clinrag:latest python -m scripts.eval_generation_heuristics
+
+docker run --rm   -v "$(pwd)/reports:/app/reports"   clinrag:latest python -m scripts.eval_faithfulness_strict
+
+docker run --rm   -v "$(pwd)/reports:/app/reports"   clinrag:latest python -m scripts.make_leaderboard
+```
+
+**Windows PowerShell**
+```powershell
+New-Item -ItemType Directory -Force reports | Out-Null
+
+docker run --rm `
+  -v ${PWD}\reports:/app/reports `
+  clinrag:latest python -m scripts.eval_retrieval
+```
+(Repeat the same pattern for the other eval scripts.)
 
 ---
 
-## LangChain + LangGraph prototypes
+## LangChain + LangGraph prototypes (optional)
+
+These are **optional orchestration demos**. The **official evaluation harness** remains the `scripts/eval_*` scripts so results stay reproducible and deterministic.
 
 Install optional deps:
 ```bash
 pip install -r requirements_langchain.txt
 ```
 
-### LangChain
+### Sanity-check LangChain wiring (not metrics)
 ```bash
-python -m prototypes.langchain_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
+docker run --rm clinrag:latest   python -m prototypes.langchain_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
 ```
 
-### LangGraph
+### Sanity-check LangGraph wiring (not metrics)
 ```bash
-python -m prototypes.langgraph_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
+docker run --rm clinrag:latest   python -m prototypes.langgraph_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
 ```
 
-> If running locally (non-Docker), run `python -m scripts.build_index` first so `data/processed/` exists.
+> Note: The eval scripts evaluate the core retrieval/generation pipeline directly (faster, deterministic). The prototypes are for demonstrating framework familiarity.
 
 ---
 
-## CI (free) + Cloud (optional)
+## CI + Cloud
 
-- Free GitHub Actions CI runs on every push (`.github/workflows/ci.yml`)
-- Azure build/deploy is optional; keep it **manual-only** until you want a live cloud demo
+- GitHub Actions CI runs on every push
+- Azure deployment is optional and manual
+- Docker image is fully self-contained
 
 ---
 
 ## License
-
 MIT
