@@ -1,128 +1,198 @@
-"""
-Answer generation utilities for ClinRAG.
+# src/rag/generate.py
+from __future__ import annotations
 
-This module is intentionally lightweight:
-- Offline stub generator (no external API calls)
-- Clean interfaces for future LLM-backed generators
-- CI-safe (no f-string backslash expressions)
-"""
-
-from typing import List, Optional
-
-try:
-    # LangChain Document type (used by retriever)
-    from langchain.schema import Document
-except ImportError:
-    # Fallback for older LangChain versions
-    from langchain.docstore.document import Document  # type: ignore
+import os
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
-# ---------------------------------------------------------------------
-# Helper: format retrieved documents into readable context
-# ---------------------------------------------------------------------
-
-def _format_docs(docs: List[Document], max_chars: int = 4000) -> str:
+def _doc_to_evidence(doc: Any, i: int) -> Dict[str, Any]:
     """
-    Convert retrieved Documents into a single context string.
+    Normalize a retrieved item into a dict evidence object.
 
-    Parameters
-    ----------
-    docs : List[Document]
-        Retrieved documents
-    max_chars : int
-        Hard cap on context length (safety for prompts)
-
-    Returns
-    -------
-    str
-        Clean, concatenated context
+    Supports:
+      - dict evidence from our core retriever
+      - LangChain Document (has .page_content, .metadata)
+      - any object with .page_content / .metadata-like attributes
     """
-    chunks: List[str] = []
+    if isinstance(doc, dict):
+        # assume already evidence-like
+        ev = dict(doc)
+        ev.setdefault("evidence_id", ev.get("id") or ev.get("doc_id") or f"doc_{i}")
+        ev.setdefault("text", ev.get("text") or ev.get("content") or "")
+        ev.setdefault("title", ev.get("title") or ev.get("doc_id") or ev["evidence_id"])
+        return ev
 
-    for i, doc in enumerate(docs):
-        # Document content
-        text = doc.page_content or ""
+    # LangChain Document or similar
+    page_content = getattr(doc, "page_content", None)
+    metadata = getattr(doc, "metadata", None) or {}
 
-        # Metadata-safe title extraction
-        metadata = doc.metadata or {}
-        title = metadata.get("title") or metadata.get("doc_id") or f"doc_{i}"
+    if page_content is None and hasattr(doc, "__dict__"):
+        # try fallbacks
+        page_content = getattr(doc, "content", "") or getattr(doc, "text", "")
 
-        block = f"[{title}]\n{text}"
-        chunks.append(block)
+    ev_id = metadata.get("evidence_id") or metadata.get("id") or metadata.get("doc_id") or f"doc_{i}"
+    title = metadata.get("title") or metadata.get("doc_id") or ev_id
 
-    full_context = "\n\n".join(chunks)
+    return {
+        "evidence_id": ev_id,
+        "title": title,
+        "text": page_content or "",
+        "metadata": metadata,
+    }
 
-    # Truncate defensively
-    if len(full_context) > max_chars:
-        full_context = full_context[:max_chars] + "\n\n[TRUNCATED]"
 
-    return full_context
+def _normalize_docs(docs: Sequence[Any]) -> List[Dict[str, Any]]:
+    return [_doc_to_evidence(d, i) for i, d in enumerate(docs or [])]
 
-
-# ---------------------------------------------------------------------
-# Offline stub generator (no LLM)
-# ---------------------------------------------------------------------
 
 def generate_answer_offline_stub(
     question: str,
-    docs: List[Document],
-) -> str:
+    docs: Sequence[Any],
+    k: int = 5,
+) -> Dict[str, Any]:
     """
-    Deterministic, offline answer generator.
-
-    This is NOT a real LLM.
-    It simply:
-    - echoes the question
-    - shows retrieved evidence
-    - demonstrates end-to-end RAG flow
-
-    Used for:
-    - local development
-    - CI
-    - Docker smoke tests
+    Offline-safe generator. Returns JSON with citations and an explicit
+    "insufficient_evidence" mode if retrieval is empty.
     """
-    context = _format_docs(docs)
+    evidences = _normalize_docs(docs)[:k]
 
-    # Clean text OUTSIDE f-string (CI-safe)
-    clean_question = question.strip()
-    clean_context = context.strip()
+    if not evidences:
+        return {
+            "question": question,
+            "answer": "Insufficient evidence in the retrieved corpus to answer confidently.",
+            "recommendations": [],
+            "citations": [],
+            "llm": "offline",
+            "insufficient_evidence": True,
+        }
 
+    citations = []
+    for ev in evidences:
+        citations.append(
+            {
+                "evidence_id": ev.get("evidence_id"),
+                "title": ev.get("title"),
+            }
+        )
+
+    # Keep the stub simple + safe. We don't pretend to "know" anything.
     answer = (
-        "=== ClinRAG (Offline Stub) ===\n\n"
-        "Question:\n"
-        f"{clean_question}\n\n"
-        "Retrieved Evidence:\n"
-        f"{clean_context}\n\n"
-        "Answer:\n"
-        "This is an offline stub response.\n"
-        "Replace this generator with a real LLM-backed implementation\n"
-        "to produce a synthesized clinical answer."
+        "I retrieved relevant evidence from the corpus. "
+        "Use the cited snippets to make a determination; if you need a model-written summary, "
+        "run with llm='openai' (optional) or keep offline mode for strict reproducibility."
     )
 
-    return answer
+    return {
+        "question": question,
+        "answer": answer,
+        "recommendations": [],
+        "citations": citations,
+        "llm": "offline",
+        "insufficient_evidence": False,
+    }
 
-
-# ---------------------------------------------------------------------
-# Placeholder: OpenAI / hosted LLM generator
-# ---------------------------------------------------------------------
 
 def generate_answer_openai(
     question: str,
-    docs: List[Document],
+    docs: Sequence[Any],
     model: str = "gpt-4o-mini",
-) -> str:
+    temperature: float = 0.0,
+    max_tokens: int = 500,
+) -> Dict[str, Any]:
     """
-    Placeholder for future OpenAI / hosted LLM integration.
-
-    This function is intentionally NOT implemented to avoid
-    accidental API calls during CI or local runs.
-
-    Implement later by:
-    - formatting docs via _format_docs
-    - constructing a prompt
-    - calling OpenAI / Azure / vLLM
+    Optional OpenAI-backed generator. Safe-by-default:
+      - no top-level openai import (CI won't need it)
+      - requires OPENAI_API_KEY at runtime
+      - forces JSON output with citations
     """
-    raise NotImplementedError(
-        "OpenAI-backed generation is not enabled yet. "
-        "Use generate_answer_offline_stub for now."
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is not set. Set it in your shell or pass -e OPENAI_API_KEY in Docker."
+        )
+
+    try:
+        from openai import OpenAI  # imported only when needed
+    except ImportError as e:
+        raise RuntimeError(
+            "OpenAI support not installed. Install requirements_openai.txt (pip install -r requirements_openai.txt)."
+        ) from e
+
+    evidences = _normalize_docs(docs)
+
+    # Build evidence text safely (no f-string backslash expressions)
+    lines: List[str] = []
+    for ev in evidences:
+        ev_id = ev.get("evidence_id", "")
+        title = ev.get("title", "")
+        text = (ev.get("text") or "").strip()
+        lines.append(f"[{ev_id}] {title}\n{text}")
+    evidence_block = "\n\n---\n\n".join(lines)
+
+    system_msg = (
+        "You are a clinical RAG assistant. "
+        "You MUST answer using ONLY the provided evidence. "
+        "If evidence is insufficient, say so and do not hallucinate. "
+        "Return ONLY valid JSON matching the required schema."
     )
+
+    user_msg = (
+        "QUESTION:\n"
+        f"{question}\n\n"
+        "EVIDENCE (cite by evidence_id):\n"
+        f"{evidence_block}\n\n"
+        "Return JSON with keys:\n"
+        "- question (string)\n"
+        "- answer (string)\n"
+        "- recommendations (list of strings)\n"
+        "- citations (list of objects with evidence_id and optional quote)\n"
+        "- llm (string)\n"
+        "- insufficient_evidence (boolean)\n"
+        "Do not include any extra keys."
+    )
+
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+
+    content = resp.choices[0].message.content
+    # content is JSON string; parse defensively
+    import json
+
+    try:
+        out = json.loads(content)
+    except Exception as e:
+        raise RuntimeError(f"OpenAI returned non-JSON content: {content[:200]}...") from e
+
+    # ensure minimal required fields exist
+    out.setdefault("question", question)
+    out.setdefault("llm", "openai")
+    out.setdefault("insufficient_evidence", False)
+    out.setdefault("citations", [])
+
+    return out
+
+
+def generate_answer(
+    question: str,
+    docs: Sequence[Any],
+    llm: str = "offline",
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Router used by core scripts and prototypes.
+    """
+    llm = (llm or "offline").lower().strip()
+    if llm == "offline":
+        return generate_answer_offline_stub(question, docs)
+    if llm == "openai":
+        return generate_answer_openai(question, docs, **kwargs)
+    raise ValueError(f"Unknown llm mode: {llm}")

@@ -1,11 +1,11 @@
 """
 LangChain RAG prototype for ClinRAG.
 
-Fix: newer LangChain retrievers prefer `.invoke()` rather than the older
-`.get_relevant_documents()`. This script supports BOTH so it won’t break
-across LangChain versions.
+Why this file exists
+- Demonstrates LangChain wiring on top of the *same* ClinRAG retriever + generators used by the core app.
+- Works across LangChain versions by preferring `.invoke()` and falling back to `.get_relevant_documents()`.
 
-Run (inside repo / inside Docker):
+Runs (inside repo / inside Docker):
   python -m prototypes.langchain_rag_prototype --question "Is metformin appropriate if eGFR is 35?"
   python -m prototypes.langchain_rag_prototype --question "..." --llm openai --model gpt-4o-mini
 """
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import inspect
 from typing import Any, List
 
 
@@ -24,29 +23,33 @@ def _import_clinrag_retriever():
     Adjust these if your repo uses a different module path.
     """
     try:
-        from src.langchain.retriever import ClinRAGRetriever  # type: ignore
-        return ClinRAGRetriever
-    except Exception:
-        pass
-
-    try:
         from src.rag.langchain_retriever import ClinRAGRetriever  # type: ignore
         return ClinRAGRetriever
     except Exception:
         pass
 
-    # Last resort: fail loudly with a helpful message.
+    try:
+        from src.langchain.retriever import ClinRAGRetriever  # type: ignore
+        return ClinRAGRetriever
+    except Exception:
+        pass
+
     raise ImportError(
         "Could not import ClinRAGRetriever. Expected one of:\n"
-        "  - src.langchain.retriever:ClinRAGRetriever\n"
         "  - src.rag.langchain_retriever:ClinRAGRetriever\n"
+        "  - src.langchain.retriever:ClinRAGRetriever\n"
         "Update the import paths in prototypes/langchain_rag_prototype.py to match your repo."
     )
 
 
-def _import_generators():
-    from src.rag.generate import generate_answer_offline_stub, generate_answer_openai  # type: ignore
-    return generate_answer_offline_stub, generate_answer_openai
+def _import_router():
+    """
+    Import the single router function.
+    - Offline always works.
+    - OpenAI is imported lazily *inside* src.rag.generate, so CI won't need it.
+    """
+    from src.rag.generate import generate_answer  # type: ignore
+    return generate_answer
 
 
 def retrieve_docs(retriever: Any, q: str) -> List[Any]:
@@ -59,29 +62,13 @@ def retrieve_docs(retriever: Any, q: str) -> List[Any]:
         return retriever.invoke(q)  # type: ignore[return-value]
     if hasattr(retriever, "get_relevant_documents") and callable(getattr(retriever, "get_relevant_documents")):
         return retriever.get_relevant_documents(q)  # type: ignore[return-value]
-    # If your retriever only exposes _get_relevant_documents, LangChain normally wraps it via invoke().
     raise AttributeError(
         f"{type(retriever).__name__} has neither .invoke() nor .get_relevant_documents(). "
-        "If it only defines _get_relevant_documents(), ensure it inherits the right LangChain base retriever."
+        "If it only defines _get_relevant_documents(), ensure it inherits the correct LangChain base Retriever."
     )
 
 
-def safe_call_openai(generate_answer_openai, question: str, docs: List[Any], model: str | None) -> Any:
-    """
-    Call generate_answer_openai with or without a model kwarg depending on its signature.
-    This prevents breakage if your generate.py has a slightly different function signature.
-    """
-    try:
-        sig = inspect.signature(generate_answer_openai)
-        if model is not None and "model" in sig.parameters:
-            return generate_answer_openai(question, docs, model=model)
-        return generate_answer_openai(question, docs)
-    except TypeError:
-        # Fallback: try without model if the signature introspection lied / wrapper function
-        return generate_answer_openai(question, docs)
-
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--question", required=True, help="User question")
     parser.add_argument("--llm", choices=["offline", "openai"], default="offline", help="Generator backend")
@@ -90,22 +77,18 @@ def main():
     args = parser.parse_args()
 
     ClinRAGRetriever = _import_clinrag_retriever()
-    generate_answer_offline_stub, generate_answer_openai = _import_generators()
+    generate_answer = _import_router()
 
-    # Instantiate the retriever.
-    # Your ClinRAGRetriever in this repo typically loads from data/processed/* by default.
-    # If yours requires explicit paths, add args and pass them here.
     retriever = ClinRAGRetriever(k=args.k)
-
-    # ---- Core flow ----
     docs = retrieve_docs(retriever, args.question)
 
-    if args.llm == "openai":
-        out = safe_call_openai(generate_answer_openai, args.question, docs, args.model)
-    else:
-        out = generate_answer_offline_stub(args.question, docs)
+    out = generate_answer(
+        args.question,
+        docs,
+        llm=args.llm,
+        model=args.model,
+    )
 
-    # Pretty-print output
     print("\n=== LangChain prototype output ===\n")
     if isinstance(out, (dict, list)):
         print(json.dumps(out, indent=2, ensure_ascii=False))

@@ -7,63 +7,50 @@ Runs:
 
 Notes:
 - Uses the baked / local FAISS index via ClinRAGRetriever.
-- Defaults to offline stub generator.
+- Uses the shared generator router in src.rag.generate (OpenAI is lazily imported only if requested).
 """
 
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, List, TypedDict
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
 from src.rag.langchain_retriever import ClinRAGRetriever
 
 
-def _import_generators():
-    """
-    Import generators in a way that doesn't break if OpenAI is not installed.
-    """
-    from src.rag.generate import generate_answer_offline_stub  # type: ignore
-
-    try:
-        from src.rag.generate import generate_answer_openai  # type: ignore
-    except Exception:
-        generate_answer_openai = None
-
-    return generate_answer_offline_stub, generate_answer_openai
+def _import_router():
+    from src.rag.generate import generate_answer  # type: ignore
+    return generate_answer
 
 
 class GraphState(TypedDict, total=False):
     question: str
     docs: List[Any]
     answer: Any
+    k: int
+    llm: str
+    model: str
 
 
 def retrieve_node(state: GraphState) -> GraphState:
     q = state["question"]
-    retriever = ClinRAGRetriever(k=5)
+    k = int(state.get("k", 5))
+    retriever = ClinRAGRetriever(k=k)
 
-    # Modern LC retriever interface: invoke(query) -> list[Document]
     docs = retriever.invoke(q)
     return {"docs": docs}
 
 
-def generate_node(state: GraphState, llm: str, model: str) -> GraphState:
+def generate_node(state: GraphState) -> GraphState:
     question = state["question"]
     docs = state.get("docs", [])
+    llm = state.get("llm", "offline")
+    model = state.get("model", "gpt-4o-mini")  # ignored in offline mode
 
-    generate_answer_offline_stub, generate_answer_openai = _import_generators()
-
-    if llm == "openai":
-        if generate_answer_openai is None:
-            raise RuntimeError(
-                "LLM=openai requested but generate_answer_openai is not available. "
-                "Install requirements_openai.txt and/or add generate_answer_openai back to src/rag/generate.py."
-            )
-        out = generate_answer_openai(question, docs, model=model)
-    else:
-        out = generate_answer_offline_stub(question, docs)
+    generate_answer = _import_router()
+    out = generate_answer(question, docs, llm=llm, model=model)
 
     return {"answer": out}
 
@@ -76,19 +63,9 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=5, help="Top-k docs to retrieve")
     args = ap.parse_args()
 
-    # Build graph
     builder = StateGraph(GraphState)
-
     builder.add_node("retrieve", retrieve_node)
-
-    # wrap generate_node to bind args
-    def _gen(state: GraphState) -> GraphState:
-        # Set k if user passed it
-        # (ClinRAGRetriever takes k at init; easiest is to store it in state or rebuild retriever.
-        # For simplicity, just rebuild retriever here if you want k to matter.)
-        return generate_node(state, llm=args.llm, model=args.model)
-
-    builder.add_node("generate", _gen)
+    builder.add_node("generate", generate_node)
 
     builder.set_entry_point("retrieve")
     builder.add_edge("retrieve", "generate")
@@ -96,7 +73,14 @@ def main() -> None:
 
     app = builder.compile()
 
-    out = app.invoke({"question": args.question})
+    out = app.invoke(
+        {
+            "question": args.question,
+            "k": args.k,
+            "llm": args.llm,
+            "model": args.model,
+        }
+    )
     print(out.get("answer"))
 
 
