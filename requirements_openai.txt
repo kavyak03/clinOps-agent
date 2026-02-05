@@ -1,2 +1,2 @@
-# Optional: OpenAI API integration
-openai>=1.0.0
+# Optional: OpenAI API integration (only needed when llm=openai)
+openai>=1.30.0
