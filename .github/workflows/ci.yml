@@ -1,71 +1,37 @@
-name: CI (lint + docker build)
+name: CI
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
-
-permissions:
-  contents: read
+  push:
+    branches: [main]
 
 jobs:
-  ci:
+  test-and-build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---- Harden runner disk space (important for docker builds) ----
-      - name: Free disk space on runner
-        shell: bash
-        run: |
-          set -euxo pipefail
-          echo "Disk before cleanup:"
-          df -h
-
-          # Remove big preinstalled toolchains we don't need
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          sudo rm -rf /usr/share/swift || true
-
-          # Clean apt caches
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-
-          # Clean Docker artifacts if any exist
-          docker system prune -af || true
-
-          echo "Disk after cleanup:"
-          df -h
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ---- Install only core + API deps (NO OpenAI, NO LangChain) ----
-      - name: Install dependencies (core + API only)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements_api.txt
 
-      # ---- Sanity check: compile core repo code ----
-      - name: Compile/import sanity check
+      - name: Compile source
         run: |
-          python -m compileall -q src scripts app
+          python -m compileall src scripts
 
-      # ---- Docker build (your Dockerfile may bake PubMedQA index) ----
-      - name: Docker build (baked PubMedQA index)
+      - name: Build Docker image
         run: |
-          docker build --pull -t clinrag:ci .
+          docker build -t clinops-agent:ci .
 
-      # Optional: free space after build so the job is less flaky
-      - name: Post-build cleanup
-        if: always()
+      - name: Smoke check image metadata
         run: |
-          docker system prune -af || true
-          df -h
+          docker image inspect clinops-agent:ci > /tmp/image-inspect.json
+          cat /tmp/image-inspect.json | head -c 2000

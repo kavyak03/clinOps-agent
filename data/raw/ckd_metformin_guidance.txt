@@ -1,0 +1,13 @@
+Title: Metformin Use and Kidney Function in Type 2 Diabetes
+
+Metformin is widely used as a first-line therapy for type 2 diabetes. In patients with chronic kidney disease, treatment decisions are often guided by estimated glomerular filtration rate, also called eGFR.
+
+General evidence summary:
+- Patients with eGFR greater than or equal to 45 mL/min/1.73 m2 are commonly considered lower risk for metformin accumulation.
+- Patients with eGFR between 30 and 44 mL/min/1.73 m2 require more careful monitoring and individualized review.
+- Patients with eGFR below 30 mL/min/1.73 m2 are generally considered high risk for metformin accumulation and lactic acidosis.
+
+In a clinical AI system, an output claiming that metformin is automatically safe at eGFR 28 should be flagged as weak or potentially unsafe unless strong supporting context is present.
+
+Important caveat:
+This document is a demo knowledge-base file for testing retrieval and validation behavior. It is not medical advice.

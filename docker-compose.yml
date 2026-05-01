@@ -1,12 +1,43 @@
 services:
-  clinrag:
-    build: .
-    container_name: clinrag
-    working_dir: /app
-    volumes:
-      # Mount your local data folder so indexes/corpora persist outside the container
-      - ./data:/app/data
+  db:
+    image: pgvector/pgvector:pg16
     environment:
-      # Optional: only needed if you run with --llm openai
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    command: ["python", "-m", "scripts.rag_cli", "--question", "Is metformin appropriate if eGFR is 35?"]
+      POSTGRES_DB: clinops
+      POSTGRES_USER: clinops
+      POSTGRES_PASSWORD: clinops
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/tracing/models.sql:/docker-entrypoint-initdb.d/001_models.sql:ro
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://clinops:clinops@db:5432/clinops
+      VECTOR_STORE: pgvector
+      PGVECTOR_TABLE: embeddings
+
+      # offline | anthropic | openai
+       # LLM provider
+      LLM_PROVIDER: ${LLM_PROVIDER:-offline}
+      LLM_MODEL: ${LLM_MODEL:-}
+
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      LOG_LEVEL: INFO
+      APP_ENV: local
+      RERANK_ENABLE: ${RERANK_ENABLE:-true}
+      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-20}
+      RERANK_MODEL: ${RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:

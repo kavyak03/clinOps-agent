@@ -1,0 +1,20 @@
+Title: Cohort Bias and Validation of Biomedical AI Claims
+
+Biomedical AI-generated insights should be evaluated against the structure and quality of the cohort used to produce them.
+
+Common cohort-level concerns:
+- sample size too small
+- excessive missingness in key clinical variables
+- subgroup imbalance by sex, age, ancestry, disease stage, or treatment exposure
+- confounding between disease severity and treatment assignment
+- single-center bias or measurement bias
+
+Validation implication:
+An AI-generated insight may sound plausible but still be unreliable if the supporting cohort is too small or imbalanced. A validation engine should check whether the cohort has enough samples, acceptable missingness, and reasonable subgroup representation.
+
+Decision layer behavior:
+- Strong evidence plus consistent cohort structure may support a validated output.
+- Plausible but underpowered evidence may support a weakly_supported output.
+- Contradictory evidence or implausible directionality may support a rejected output.
+
+This document is intended for local testing of clinical AI validation workflows.

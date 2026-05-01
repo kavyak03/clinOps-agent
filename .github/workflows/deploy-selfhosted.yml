@@ -1,0 +1,52 @@
+name: Deploy to Self-Hosted Docker Host
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: "GitHub Environment to use"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - prod
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare .env from environment secrets
+        shell: bash
+        run: |
+          cat > .env <<'EOF'
+          LLM_PROVIDER=${{ secrets.LLM_PROVIDER }}
+          LLM_MODEL=${{ secrets.LLM_MODEL }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          VECTOR_STORE=${{ secrets.VECTOR_STORE }}
+          RERANK_ENABLE=${{ secrets.RERANK_ENABLE }}
+          RERANK_CANDIDATES=${{ secrets.RERANK_CANDIDATES }}
+          RERANK_MODEL=${{ secrets.RERANK_MODEL }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          PGVECTOR_TABLE=${{ secrets.PGVECTOR_TABLE }}
+          LOG_LEVEL=${{ secrets.LOG_LEVEL }}
+          APP_ENV=${{ inputs.environment_name }}
+          EOF
+
+      - name: Build and start containers
+        shell: bash
+        run: |
+          docker compose --env-file .env -f infra/docker-deploy/compose.selfhosted.yml up --build -d
+
+      - name: Show running containers
+        shell: bash
+        run: docker compose --env-file .env -f infra/docker-deploy/compose.selfhosted.yml ps

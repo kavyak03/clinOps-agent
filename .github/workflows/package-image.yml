@@ -1,0 +1,35 @@
+name: Package Docker Image
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package-image:
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t clinops-agent:${{ github.sha }} .
+
+      - name: Save Docker image as tar
+        run: |
+          mkdir -p dist
+          docker save clinops-agent:${{ github.sha }} -o dist/clinops-agent-${{ github.sha }}.tar
+          gzip dist/clinops-agent-${{ github.sha }}.tar
+
+      - name: Upload packaged image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinops-agent-image-${{ github.sha }}
+          path: dist/clinops-agent-${{ github.sha }}.tar.gz
+          retention-days: 14

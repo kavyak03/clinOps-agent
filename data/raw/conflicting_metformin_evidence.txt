@@ -1,0 +1,15 @@
+Title: Conflicting Evidence Example: Metformin in Severe CKD
+
+A small retrospective study reported that carefully monitored patients with severe chronic kidney disease who continued metformin did not experience increased adverse events.
+
+However, this finding should be interpreted cautiously:
+- sample size was small
+- patients were treated in a specialized setting
+- selection bias was likely
+- the cohort may not represent the broader CKD population
+- the finding conflicts with more conservative guidance for eGFR below 30
+
+Validation implication:
+If an AI-generated insight claims that metformin is broadly safe in all patients with eGFR below 30, the system should not mark that claim as fully validated. A more appropriate status may be weakly supported or rejected depending on the retrieved evidence and cohort context.
+
+This document is intentionally included to test contradiction handling and weak evidence detection.

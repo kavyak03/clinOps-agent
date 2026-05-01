@@ -1,0 +1,7 @@
+{
+  "patient_id": "string",
+  "gene_symbol": "string",
+  "expression": "number",
+  "mutation_status": "string",
+  "pathway": "string"
+}

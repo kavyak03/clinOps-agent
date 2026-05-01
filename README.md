@@ -1,244 +1,298 @@
-# ClinRAG — Healthcare RAG with Synthetic Data + Public Corpora
-**Bioinformatics × LLM Engineering**
+# ClinOps Agent — Biomedical AI Validation & Decision System
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Docker](https://img.shields.io/badge/docker-ready-blue)
-![Offline](https://img.shields.io/badge/offline-safe-success)
+An **LLM + RAG + Tools** service for biomedical evidence Q&A.
 
-ClinRAG is a **reproducible healthcare Retrieval-Augmented Generation (RAG) mini-system** demonstrating how to build **grounded, auditable, and safe clinical LLM workflows** using **synthetic data** and **public corpora**.
+------------------------------------------------------------------------
 
-The system is **offline-first by default** and supports optional LLM, orchestration, and cloud integrations.
+## Core Capabilities
+
+-   RAG with citations
+-   ReAct-style agent loop (plan → retrieve → tool → synthesize)
+-   Safety guardrails for clinical-adjacent use
+-   Postgres-backed tracing
+-   Evaluation harness for regression testing
+
+------------------------------------------------------------------------
+
+## Quickstart
+
+### Start services
+
+``` bash
+docker compose up --build
+```
+
+API: http://localhost:8000\
+Docs: http://localhost:8000/docs
+
+------------------------------------------------------------------------
+
+### Example query
+
+``` bash
+curl -s http://localhost:8000/ask   -H "Content-Type: application/json"   -d '{"question":"Summarize evidence about metformin use when eGFR is ~35.", "k": 5}'
+```
+
+------------------------------------------------------------------------
+
+## LLM Providers
+
+Default: offline
+
+Anthropic:
+
+``` bash
+export LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY="YOUR_KEY"
+```
+
+OpenAI:
+
+``` bash
+export LLM_PROVIDER=openai
+export OPENAI_API_KEY="YOUR_KEY"
+```
+
+------------------------------------------------------------------------
+
+## Tracing
+
+Tables: - runs - retrieval_events - tool_events
+
+View recent runs:
+
+``` bash
+curl -s "http://localhost:8000/runs/recent?limit=10"
+```
+
+------------------------------------------------------------------------
+
+## Evaluation
+
+``` bash
+export EVAL_API_BASE=http://localhost:8000
+python -m src.eval.run_eval
+```
+
+------------------------------------------------------------------------
+
+## AWS Deployment
+
+See deploy/aws/lightsail.md
+
+------------------------------------------------------------------------
+
+## Ingestion (recommended)
+
+Put documents under `data/raw/` (supported: `.txt`, `.md`, `.pdf`) and run:
+
+```bash
+# Run ingestion inside the api container (recommended)
+docker compose exec api python scripts/ingest.py --input data/raw --glob "**/*.*" --chunk_chars 1200 --overlap 200
+```
+
+Then query the API normally (`/ask` or `/agent/ask`). This populates the `embeddings` table in Postgres/pgvector.
+
+## Provider setup (OpenAI / Anthropic) from scratch
+
+This repo runs **offline by default** (no API keys required). To use real LLMs, you only need:
+1) an API key from the provider
+2) to set environment variables.
+
+### A. Anthropic (recommended)
+
+1) Create an Anthropic account and generate an API key.
+2) Set environment variables **in your shell** (works for local runs) **or** in a `.env` file (recommended for Docker).
+
+**Option 1: export in your shell**
+```bash
+export LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_KEY"
+# Optional model override:
+export LLM_MODEL="claude-3-5-sonnet-latest"
+```
+
+**Option 2: create a `.env` file (recommended)**
+Create a file named `.env` at repo root:
+```env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=YOUR_ANTHROPIC_KEY
+# Optional:
+LLM_MODEL=claude-3-5-sonnet-latest
+```
+Then run:
+```bash
+docker compose --env-file .env up --build -d
+```
+
+### B. OpenAI
+
+1) Create an OpenAI account and generate an API key.
+2) Set environment variables.
+
+**Option 1: export in your shell**
+```bash
+export LLM_PROVIDER=openai
+export OPENAI_API_KEY="YOUR_OPENAI_KEY"
+# Optional model override:
+export LLM_MODEL="gpt-4.1-mini"
+```
+
+**Option 2: create a `.env` file (recommended)**
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=YOUR_OPENAI_KEY
+# Optional:
+LLM_MODEL=gpt-4.1-mini
+```
+Then:
+```bash
+docker compose --env-file .env up --build -d
+```
+
+### How the provider is used in the pipeline
+
+At request time:
+- `/ask` does: **retrieve → synthesize**
+- `/agent/ask` does: **plan → retrieve → tool(s) → synthesize**
+
+The LLM provider is selected by:
+- `LLM_PROVIDER` = `offline` | `anthropic` | `openai`
+- `LLM_MODEL` (optional) to override the default model for that provider
+
+If keys are missing, the API will error at startup for that provider.
+If you want a safe default, keep `LLM_PROVIDER=offline` until you’ve set keys.
+
+**Tip:** Start offline, ingest your corpus, then flip providers:
+```bash
+make up
+make ingest
+# then set provider envs and restart
+docker compose down
+docker compose --env-file .env up --build -d
+```
+------------------------------------------------------------------------
+
+## Cross-encoder re-ranking
+
+This repo now supports a **two-stage retrieval pipeline**:
+
+1. **Broad vector retrieval** with pgvector to maximize recall
+2. **Cross-encoder re-ranking** to improve precision before synthesis
+
+Pipeline:
+
+``` text
+query
+  -> embedding
+  -> pgvector search (top-N candidates)
+  -> cross-encoder rerank
+  -> top-k evidence
+  -> LLM synthesis
+```
+
+### Why this matters
+
+Vector retrieval is fast, but approximate. A cross-encoder jointly scores the **query and each retrieved chunk together**, which often improves retrieval precision and final answer grounding.
+
+### Environment variables
+
+``` env
+RERANK_ENABLE=true
+RERANK_CANDIDATES=20
+RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+If the reranker cannot load for any reason, the system safely falls back to the original vector-ranked order.
 
 ---
 
-## What this repo demonstrates
+## Makefile shortcuts
 
-- Synthetic patient charts (no PHI)
-- Public corpus option (PubMedQA)
-- Embeddings + FAISS retrieval
-- Structured JSON outputs with citations
-- Faithfulness + grounding evaluation harness
-- Offline-safe mode (no API calls required)
-- Dockerized, reproducible builds
-- Optional LangChain + LangGraph prototypes
-- Optional Azure cloud deployment
-
----
-
-## ⭐ Recommended execution paths (important)
-
-There are **three supported ways** to run this repo. They are **for different usecases** — pick the one that fits your goal.
-
-### ✅ Path A — Docker (Recommended)
-- Fastest way to verify functionality
-- No Python dependency issues
-- FAISS index baked into the image
-- Ideal for reviewers and demos
-
-### ✅ Path B — Local Python via WSL (Windows) or native Linux/macOS
-- Best for development and debugging
-- Real `curl`, Linux-like behavior
-- Matches cloud + CI environments
-
-### ⚠️ Path C — Local Python via Windows PowerShell
-- Supported but more fragile
-- PowerShell aliases and quoting differences
-- Use only if WSL/Docker are unavailable
-
----
-
-## 1-minute quickstart (Docker — recommended)
-
-### Build (bakes PubMedQA + FAISS index into the image)
-```bash
-docker build -t clinrag:latest .
-```
-
-### Run API
-```bash
-docker run --rm -p 8080:8080 clinrag:latest
-```
-
-### Test (Linux / macOS / WSL)
-```bash
-curl http://localhost:8080/health
-
-curl -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d '{"question":"Is metformin appropriate if eGFR is 35?","llm":"offline","k":5}'
-```
-
-> **Windows PowerShell note**
-```powershell
-Invoke-RestMethod `
-  -Uri http://localhost:8080/ask `
-  -Method POST `
-  -ContentType "application/json" `
-  -Body '{"question":"Is metformin appropriate if eGFR is 35?","llm":"offline","k":5}'
-```
-
----
-
-## 🔹 Run RAG directly from the CLI (no API server)
-
-This runs the **same retrieval + generation logic** as the API, without starting FastAPI.
-
-### Docker (offline)
-```bash
-docker run --rm clinrag:latest   python -m scripts.rag_cli   --question "Is metformin appropriate if eGFR is 35?"
-```
-
-> **Note:** When using the Docker image **without volume mounts**, the FAISS index is already baked into the image at build time, so no local indexing step is required.
-
-This is the **fastest sanity check** for the core RAG pipeline.
-
----
-
-## OpenAI integration (optional)
-
-Offline mode is the default. OpenAI is **optional** and never required for CI.
-
-### Step-by-step: set `OPENAI_API_KEY`
-
-#### Option 1 — Set it in your shell (recommended)
-**Windows PowerShell**
-```powershell
-$env:OPENAI_API_KEY="sk-..."
-```
-
-**Linux / macOS / WSL**
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-#### Option 2 — Pass it at Docker run time
-**PowerShell**
-```powershell
-docker run --rm -p 8080:8080 `
-  -e OPENAI_API_KEY=$env:OPENAI_API_KEY `
-  clinrag:latest
-```
-
-**Linux / macOS / WSL**
-```bash
-docker run --rm -p 8080:8080   -e OPENAI_API_KEY=$OPENAI_API_KEY   clinrag:latest
-```
-
-### API call with `llm=openai`
-```bash
-curl -X POST http://localhost:8080/ask   -H "Content-Type: application/json"   -d '{"question":"Is metformin appropriate if eGFR is 35?","llm":"openai","k":5}'
-```
-
-> OpenAI requires API billing/quota. Offline mode always works.
-
----
-
-## Optional: Local Python run (no Docker)
-
-### Windows users: use WSL (recommended)
+If you have `make` installed, you can run common commands quickly:
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
-pip install -r requirements_api.txt
-pip install -r requirements_langchain.txt   # optional
-pip install -r requirements_openai.txt      # optional
+make up        # start services
+make ingest    # ingest docs from data/raw into pgvector
+make eval      # run eval harness
+make logs      # follow api logs
+make down      # stop services
 ```
 
-### Choose data mode
+## Generic CI/CD
 
-#### Synthetic (offline)
+This repo includes a generic GitHub Actions CI/CD setup that does not require AWS or other cloud credentials.
+
+Included files:
+
+`.github/workflows/ci.yml` — runs checks and builds the Docker image on push / PR
+`.github/workflows/package-image.yml` — packages the Docker image as a downloadable artifact
+`.github/workflows/deploy-selfhosted.yml` — optional deployment to a self-hosted Docker machine
+`docs/CICD.md` — step-by-step CI/CD runbook
+
+
+------------------------------------------------------------------------
+
+## Unified flagship architecture
+
+This repo keeps the original RAG backbone and adds three new layers around it:
+
+1. **Simulation layer**
+   - synthetic cohort generation
+   - noise / bias injection
+2. **Validation layer**
+   - statistical checks
+   - biological plausibility checks
+   - cohort consistency checks
+   - evidence alignment checks
+3. **Decision layer**
+   - validated / weakly supported / rejected output
+   - recommendation
+   - explanation
+
+### New end-to-end flow
+
+Input cohort / patient data  
+→ synthetic or processed cohort load  
+→ baseline risk modeling  
+→ RAG retrieves supporting evidence  
+→ LLM generates candidate insight  
+→ validation engine checks:
+  - statistical validity
+  - biological plausibility
+  - cohort consistency
+  - evidence grounding  
+→ decision layer returns:
+  - validation status
+  - recommendation
+  - explanation
+
+### New files added
+
+- `src/simulation/`
+- `src/models/`
+- `src/validation/`
+- `src/decision/`
+- `scripts/run_pipeline.py`
+- `scripts/run_simulation.py`
+- `scripts/run_validation.py`
+- `scripts/run_decision_demo.py`
+- `schemas/clinical_schema.json`
+- `schemas/omics_schema.json`
+- `data/synthetic/sample_clinical_cohort.jsonl`
+
+### New API endpoint
+
+- `POST /decision/ask`
+
+This endpoint accepts a cohort + question (or generates a lightweight synthetic cohort if none is provided), runs retrieval and LLM synthesis, validates the candidate insight, and returns a structured decision-grade output.
+
+### New local demo commands
+
 ```bash
-python -m scripts.make_data
-python -m scripts.run_qc
-python -m scripts.build_index
+make run-sim
+make run-validate
+make run-decision
+make run-pipeline
 ```
 
-#### Public PubMedQA
-```bash
-python -m scripts.download_public_corpus_pubmedqa   --config pqa_labeled --split train --max_examples 2000
-python -m scripts.build_index   --corpus data/corpora/public/pubmedqa_corpus_singleline.jsonl
-```
-
-### Run RAG CLI locally (after indexing)
-```bash
-python -m scripts.rag_cli   --question "Is metformin appropriate if eGFR is 35?"
-python -m scripts.rag_cli   --question "Is metformin appropriate if eGFR is 35?" --llm openai --model gpt-4o-mini
-```
-
-### Run API locally
-```bash
-uvicorn app.api:app --host 0.0.0.0 --port 8080
-```
-
----
-
-## Evaluation (offline + deterministic)
-
-### Local Python (fast iteration)
-```bash
-python -m scripts.eval_retrieval
-python -m scripts.eval_generation_heuristics
-python -m scripts.eval_faithfulness_strict
-python -m scripts.make_leaderboard
-```
-
-### Run eval inside Docker (recommended for reviewers)
-Evaluation scripts run **batch metrics** by executing the retrieval/generation pipeline programmatically. They **do not require** the API server (`curl`) to be running.
-
-```bash
-docker run --rm clinrag:latest python -m scripts.eval_retrieval
-docker run --rm clinrag:latest python -m scripts.eval_generation_heuristics
-docker run --rm clinrag:latest python -m scripts.eval_faithfulness_strict
-docker run --rm clinrag:latest python -m scripts.make_leaderboard
-```
-
-### Save evaluation outputs to your machine (mount `reports/`)
-**WSL / Linux / macOS**
-```bash
-mkdir -p reports
-docker run --rm -v "$(pwd)/reports:/app/reports" clinrag:latest python -m scripts.eval_retrieval
-```
-
-**Windows PowerShell**
-```powershell
-New-Item -ItemType Directory -Force reports | Out-Null
-docker run --rm `
-  -v ${PWD}
-eports:/app/reports `
-  clinrag:latest python -m scripts.eval_retrieval
-```
-(Repeat the same pattern for the other eval scripts.)
-
----
-
-## LangChain + LangGraph prototypes (optional)
-
-These are **optional orchestration demos**. The official evaluation harness remains the `scripts/eval_*` scripts so results stay reproducible.
-
-### LangChain (sanity-check wiring)
-```bash
-docker run --rm clinrag:latest   python -m prototypes.langchain_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
-docker run --rm clinrag:latest   python -m prototypes.langchain_rag_prototype   --question "..." --llm openai --model gpt-4o-mini
-```
-
-### LangGraph (sanity-check wiring)
-```bash
-docker run --rm clinrag:latest   python -m prototypes.langgraph_rag_prototype   --question "Is metformin appropriate if eGFR is 35?"
-docker run --rm clinrag:latest   python -m prototypes.langgraph_rag_prototype   --question "..." --llm openai --model gpt-4o-mini
-```
-
----
-
-## CI + Cloud
-
-- GitHub Actions CI runs on every push
-- CI should install only `requirements.txt` + `requirements_api.txt`
-- Azure deployment is optional and manual
-- Docker image is fully self-contained
-
----
-
-## License
-MIT

@@ -1,0 +1,15 @@
+Title: eGFR and CKD Progression Risk
+
+Estimated glomerular filtration rate, or eGFR, is a major marker of kidney function. Lower eGFR generally indicates worse kidney function and higher risk of chronic kidney disease progression.
+
+Common staging concepts:
+- eGFR greater than or equal to 90 may be consistent with preserved filtration when other kidney damage markers are present.
+- eGFR between 60 and 89 indicates mildly reduced kidney function in the presence of kidney damage.
+- eGFR between 30 and 59 is often categorized as stage 3 chronic kidney disease.
+- eGFR between 15 and 29 is often categorized as stage 4 chronic kidney disease.
+- eGFR below 15 is consistent with kidney failure.
+
+Biological plausibility rule:
+An AI-generated insight stating that lower eGFR is associated with higher CKD-related risk is biologically plausible. An insight stating that lower eGFR reduces CKD risk should be treated as biologically implausible.
+
+This document is for local demo testing only.

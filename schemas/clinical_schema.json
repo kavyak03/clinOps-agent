@@ -1,0 +1,11 @@
+{
+  "patient_id": "string",
+  "age": "integer",
+  "sex": "string",
+  "egfr": "number",
+  "creatinine": "number",
+  "a1c": "number",
+  "ldl": "number",
+  "outcome_risk": "number",
+  "cohort": "string"
+}

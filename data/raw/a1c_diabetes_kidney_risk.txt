@@ -1,0 +1,16 @@
+Title: HbA1c, Diabetes Control, and Kidney-Related Risk
+
+Hemoglobin A1c, often written as HbA1c or A1c, reflects average blood glucose over the prior several months. Higher A1c values can indicate poorer glycemic control.
+
+In diabetes cohorts, higher A1c is commonly associated with:
+- greater risk of microvascular complications
+- higher likelihood of diabetic kidney disease progression
+- increased need for treatment intensification
+
+For the validation engine:
+A candidate insight stating that higher A1c is associated with higher metabolic or kidney-related risk is generally biologically plausible. A candidate insight stating that higher A1c strongly protects against diabetic kidney disease should be flagged as suspicious unless strong evidence is retrieved.
+
+Important nuance:
+The relationship between glycemic control and outcomes may vary in older, frail, or multi-morbid populations, where overly aggressive glucose lowering can introduce other risks.
+
+This is a demo document for RAG testing and not clinical advice.
