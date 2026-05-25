@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 from typing import Any, Dict, List
 
 from openai import OpenAI
+
+from src.llm.schema import normalize_llm_answer, provider_error_answer
 
 
 class OpenAILLM:
@@ -16,46 +18,6 @@ class OpenAILLM:
             raise RuntimeError("OPENAI_API_KEY is not set")
         self.client = OpenAI(api_key=key)
         self.model_name = os.getenv("LLM_MODEL", "").strip() or "gpt-4o-mini"
-
-    def _normalize_citations(self, citations: Any) -> List[Dict[str, Any]]:
-        if citations is None:
-            return []
-
-        if isinstance(citations, dict):
-            return [citations]
-
-        if isinstance(citations, str):
-            return [{"id": citations}]
-
-        if isinstance(citations, list):
-            out: List[Dict[str, Any]] = []
-            for item in citations:
-                if isinstance(item, dict):
-                    out.append(item)
-                else:
-                    out.append({"id": str(item)})
-            return out
-
-        return [{"id": str(citations)}]
-
-    def _normalize_uncertainties(self, uncertainties: Any) -> List[str]:
-        if uncertainties is None:
-            return []
-
-        if isinstance(uncertainties, list):
-            return [str(item) for item in uncertainties]
-
-        if isinstance(uncertainties, str):
-            return [uncertainties]
-
-        return [str(uncertainties)]
-
-    def _normalize_response_obj(self, obj: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "answer": str(obj.get("answer", "")),
-            "citations": self._normalize_citations(obj.get("citations", [])),
-            "uncertainties": self._normalize_uncertainties(obj.get("uncertainties", [])),
-        }
 
     def plan(self, question: str) -> Dict[str, Any]:
         prompt = (
@@ -74,8 +36,7 @@ class OpenAILLM:
                 input=prompt,
                 temperature=0.2,
             )
-            text = r.output_text
-            obj = json.loads(text)
+            obj = json.loads(r.output_text)
             if not isinstance(obj, dict):
                 raise ValueError("Planner output was not a JSON object.")
             obj.setdefault("query", question)
@@ -88,6 +49,7 @@ class OpenAILLM:
             )
             return obj
         except Exception:
+            # Planner failure should not fail the request. Fall back to the original question and safe tools.
             return {
                 "query": question,
                 "tools": [
@@ -96,11 +58,7 @@ class OpenAILLM:
                 ],
             }
 
-    def answer_with_citations(
-        self,
-        question: str,
-        evidence: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+    def answer_with_citations(self, question: str, evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
         return self.synthesize(question, evidence, tool_results=[])
 
     def synthesize(
@@ -146,7 +104,6 @@ class OpenAILLM:
                 temperature=0.2,
             )
             text = r.output_text
-
             try:
                 obj = json.loads(text)
                 if not isinstance(obj, dict):
@@ -157,18 +114,7 @@ class OpenAILLM:
                     "citations": [],
                     "uncertainties": ["Model output was not valid JSON."],
                 }
-
-            return self._normalize_response_obj(obj)
+            return normalize_llm_answer(obj).model_dump()
 
         except Exception as exc:
-            # Keep API from crashing on provider errors such as quota/rate limit.
-            return {
-                "answer": (
-                    "OpenAI provider error. The retrieval pipeline ran, but synthesis "
-                    f"could not complete. Error type: {type(exc).__name__}."
-                ),
-                "citations": [],
-                "uncertainties": [
-                    "External LLM provider call failed. Check API key, quota, billing, or model access."
-                ],
-            }
+            return provider_error_answer(self.provider_name, self.model_name, exc)

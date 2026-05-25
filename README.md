@@ -296,3 +296,88 @@ make run-decision
 make run-pipeline
 ```
 
+
+------------------------------------------------------------------------
+
+## Production hardening additions
+
+This repo now includes several production-minded safeguards:
+
+- provider error handling for OpenAI/Anthropic failures
+- strict LLM output schema normalization via `src/llm/schema.py`
+- optional API-key protection with `REQUIRE_API_KEY=true`
+- `APP_ENV=production` mode that disables synthetic cohort fallback
+- CI smoke eval gate via `python -m src.eval.eval_gate --smoke`
+- improved decision evidence formatting with vector/rerank score fields
+
+See:
+
+```text
+docs/PRODUCTION_HARDENING.md
+docs/LOCAL_NO_DOCKER_TESTING.md
+```
+
+### Optional API key auth
+
+```env
+REQUIRE_API_KEY=true
+API_KEY=your_internal_key
+```
+
+Then call protected endpoints with:
+
+```bash
+curl -H "X-API-Key: your_internal_key" ...
+```
+
+### Production mode
+
+```env
+APP_ENV=production
+```
+
+In production mode, `/decision/ask` requires explicit `cohort` input and will not silently generate a synthetic demo cohort.
+
+------------------------------------------------------------------------
+
+## Optional LangGraph decision workflow demo
+
+The default pipeline remains custom and transparent. An optional LangGraph-style workflow demo is included for framework familiarity without rewriting the production path.
+
+Run without Docker:
+
+```bash
+python scripts/run_langgraph_decision_demo.py
+python scripts/run_pipeline.py --offline-demo
+```
+
+Install optional dependencies if you want to run with actual LangGraph:
+
+```bash
+pip install -r requirements_langchain.txt
+python scripts/run_langgraph_decision_demo.py
+python scripts/run_pipeline.py --offline-demo
+```
+
+See:
+
+```text
+docs/LANGGRAPH_DEMO.md
+```
+
+------------------------------------------------------------------------
+
+## No-Docker local smoke test
+
+For low-resource machines, run these before pushing:
+
+```bash
+python -m compileall src scripts
+python scripts/local_smoke_no_docker.py
+python -m src.eval.eval_gate --smoke
+python scripts/run_langgraph_decision_demo.py
+python scripts/run_pipeline.py --offline-demo
+```
+
+Full `/ask`, `/agent/ask`, and `/decision/ask` API tests still require pgvector/Postgres, usually via Docker Compose.
+

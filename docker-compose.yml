@@ -26,8 +26,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
-      LOG_LEVEL: INFO
-      APP_ENV: local
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_ENV: ${APP_ENV:-local}
+      REQUIRE_API_KEY: ${REQUIRE_API_KEY:-false}
+      API_KEY: ${API_KEY:-}
       RERANK_ENABLE: ${RERANK_ENABLE:-true}
       RERANK_CANDIDATES: ${RERANK_CANDIDATES:-20}
       RERANK_MODEL: ${RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}

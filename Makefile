@@ -15,7 +15,8 @@ help:
 	@echo "  make health    - call /healthz"
 
 up:
-	docker compose up --build -d
+	docker compose build api
+	docker compose up -d
 
 down:
 	docker compose down
@@ -53,3 +54,15 @@ run-decision:
 
 run-pipeline:
 	docker compose exec api python scripts/run_pipeline.py --api-base http://localhost:8000
+
+
+# No-Docker local smoke checks. These do not require Postgres/pgvector or a running API.
+local-smoke:
+	python scripts/local_smoke_no_docker.py
+
+eval-gate-smoke:
+	python -m src.eval.eval_gate --smoke
+
+langgraph-demo:
+	python scripts/run_langgraph_decision_demo.py
+

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from src.llm.factory import get_llm
+from src.llm.schema import normalize_llm_answer
 from src.vectorstore.factory import get_vector_store
 from src.agent.loop import agent_answer
 from src.tracing.logger import TraceLogger
@@ -25,7 +27,7 @@ from src.models.baseline_models import run_baseline_models
 from src.simulation.cohort_generator import generate_synthetic_cohort
 
 
-app = FastAPI(title="ClinOps Agent", version="0.1.0")
+app = FastAPI(title="ClinOps Agent", version="0.2.0")
 
 
 class AskRequest(BaseModel):
@@ -70,6 +72,40 @@ class DecisionResponse(BaseModel):
     final_decision: str
     explanation: str
     run_id: str
+    clinical_use_boundary: str = (
+        "Research and decision-support only. Not medical advice. "
+        "Final clinical decisions require qualified professional review."
+    )
+
+
+def _truthy_env(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _app_env() -> str:
+    return os.getenv("APP_ENV", "local").strip().lower()
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """
+    Optional lightweight API-key protection.
+
+    Local/default behavior:
+      REQUIRE_API_KEY=false -> no auth required
+
+    Production-ish behavior:
+      REQUIRE_API_KEY=true and API_KEY=<secret>
+      Clients must send: X-API-Key: <secret>
+    """
+    if not _truthy_env("REQUIRE_API_KEY", "false"):
+        return
+
+    expected = os.getenv("API_KEY", "").strip()
+    if not expected:
+        raise HTTPException(status_code=500, detail="API key auth is enabled but API_KEY is not configured.")
+
+    if x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header.")
 
 
 def _basic_guardrails(question: str) -> Optional[str]:
@@ -96,83 +132,35 @@ def _basic_guardrails(question: str) -> Optional[str]:
     return None
 
 
-def _normalize_citations(citations: Any) -> List[Dict[str, Any]]:
-    """
-    API schema expects citations as List[Dict[str, Any]].
-
-    Real LLMs may return:
-      - ["1", "2"]
-      - ["[1]", "[2]"]
-      - "1"
-      - [{"id": "1"}]
-
-    This function normalizes all of those into a safe list of dictionaries.
-    """
-    if citations is None:
-        return []
-
-    if isinstance(citations, dict):
-        return [citations]
-
-    if isinstance(citations, str):
-        return [{"id": citations}]
-
-    if isinstance(citations, list):
-        normalized: List[Dict[str, Any]] = []
-        for item in citations:
-            if isinstance(item, dict):
-                normalized.append(item)
-            else:
-                normalized.append({"id": str(item)})
-        return normalized
-
-    return [{"id": str(citations)}]
+def _get_llm_or_http():
+    try:
+        return get_llm()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_type": "llm_provider_configuration_error",
+                "message": str(exc),
+                "hint": "Check LLM_PROVIDER, provider API keys, LLM_MODEL, quota, billing, and model access.",
+            },
+        ) from exc
 
 
-def _normalize_uncertainties(uncertainties: Any) -> List[str]:
-    """
-    API schema expects uncertainties as List[str].
-
-    Real LLMs may return:
-      - "Some uncertainty text"
-      - ["uncertainty 1", "uncertainty 2"]
-      - null
-
-    This function normalizes them safely.
-    """
-    if uncertainties is None:
-        return []
-
-    if isinstance(uncertainties, list):
-        return [str(item) for item in uncertainties]
-
-    if isinstance(uncertainties, str):
-        return [uncertainties]
-
-    return [str(uncertainties)]
-
-
-def _normalize_llm_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Defensive normalization at API boundary.
-
-    This prevents a real LLM provider from crashing the API when it returns
-    semantically useful but slightly schema-invalid JSON.
-    """
-    return {
-        "answer": str(result.get("answer", "")),
-        "citations": _normalize_citations(result.get("citations", [])),
-        "uncertainties": _normalize_uncertainties(result.get("uncertainties", [])),
-        "refusal_reason": result.get("refusal_reason"),
-    }
+def _retrieve_with_rerank(question: str, k: int) -> List[Dict[str, Any]]:
+    store = get_vector_store()
+    reranker = get_reranker()
+    candidate_k = max(k, getattr(reranker, "candidate_k", k))
+    evidence = store.search(question, k=candidate_k)
+    evidence = reranker.rerank(question, evidence, top_k=k)
+    return evidence
 
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "app_env": _app_env()}
 
 
-@app.post("/ask", response_model=AskResponse)
+@app.post("/ask", response_model=AskResponse, dependencies=[Depends(require_api_key)])
 def ask(req: AskRequest) -> AskResponse:
     run_id = str(uuid.uuid4())
     started = time.time()
@@ -188,12 +176,11 @@ def ask(req: AskRequest) -> AskResponse:
             run_id=run_id,
         )
 
-    store = get_vector_store()
-    llm = get_llm()
+    llm = _get_llm_or_http()
     tracer = TraceLogger()
 
-    evidence = store.search(req.question, k=req.k)
-    result = _normalize_llm_result(
+    evidence = _retrieve_with_rerank(req.question, req.k)
+    result = normalize_llm_answer(
         llm.answer_with_citations(question=req.question, evidence=evidence)
     )
 
@@ -205,21 +192,26 @@ def ask(req: AskRequest) -> AskResponse:
         model=getattr(llm, "model_name", "unknown"),
         provider=getattr(llm, "provider_name", "unknown"),
         latency_ms=latency_ms,
-        meta={"endpoint": "/ask"},
+        meta={
+            "endpoint": "/ask",
+            "app_env": _app_env(),
+            "provider_error": result.provider_error,
+            "evidence_count": len(evidence),
+        },
     )
     tracer.log_retrieval(run_id=run_id, evidence=evidence)
 
     return AskResponse(
-        answer=result["answer"],
-        citations=result["citations"],
+        answer=result.answer,
+        citations=result.citations,
         evidence=[EvidenceChunk(**e) for e in evidence],
-        uncertainties=result["uncertainties"],
-        refusal_reason=result["refusal_reason"],
+        uncertainties=result.uncertainties,
+        refusal_reason=result.refusal_reason,
         run_id=run_id,
     )
 
 
-@app.post("/agent/ask", response_model=AskResponse)
+@app.post("/agent/ask", response_model=AskResponse, dependencies=[Depends(require_api_key)])
 def agent_ask(req: AskRequest) -> AskResponse:
     run_id = str(uuid.uuid4())
     started = time.time()
@@ -236,7 +228,7 @@ def agent_ask(req: AskRequest) -> AskResponse:
         )
 
     store = get_vector_store()
-    llm = get_llm()
+    llm = _get_llm_or_http()
     tracer = TraceLogger()
 
     raw_result = agent_answer(
@@ -247,7 +239,7 @@ def agent_ask(req: AskRequest) -> AskResponse:
         run_id=run_id,
         tracer=tracer,
     )
-    result = _normalize_llm_result(raw_result)
+    result = normalize_llm_answer(raw_result)
 
     latency_ms = int((time.time() - started) * 1000)
     tracer.log_run(
@@ -256,31 +248,48 @@ def agent_ask(req: AskRequest) -> AskResponse:
         model=getattr(llm, "model_name", "unknown"),
         provider=getattr(llm, "provider_name", "unknown"),
         latency_ms=latency_ms,
-        meta={"endpoint": "/agent/ask"},
+        meta={
+            "endpoint": "/agent/ask",
+            "app_env": _app_env(),
+            "provider_error": result.provider_error,
+            "evidence_count": len(raw_result.get("evidence", [])),
+        },
     )
 
     return AskResponse(
-        answer=result["answer"],
-        citations=result["citations"],
+        answer=result.answer,
+        citations=result.citations,
         evidence=[EvidenceChunk(**e) for e in raw_result.get("evidence", [])],
-        uncertainties=result["uncertainties"],
-        refusal_reason=result["refusal_reason"],
+        uncertainties=result.uncertainties,
+        refusal_reason=result.refusal_reason,
         run_id=run_id,
     )
 
 
-@app.get("/runs/recent")
+@app.get("/runs/recent", dependencies=[Depends(require_api_key)])
 def runs_recent(limit: int = 20) -> List[Dict[str, Any]]:
     tracer = TraceLogger()
     return tracer.get_recent_runs(limit=limit)
 
 
-@app.post("/decision/ask", response_model=DecisionResponse)
+@app.post("/decision/ask", response_model=DecisionResponse, dependencies=[Depends(require_api_key)])
 def decision_ask(req: DecisionRequest) -> DecisionResponse:
     run_id = str(uuid.uuid4())
     started = time.time()
 
-    cohort = req.cohort or generate_synthetic_cohort(40)
+    if req.cohort is None:
+        if _app_env() == "production":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_type": "cohort_required",
+                    "message": "APP_ENV=production requires explicit cohort input. Synthetic fallback is disabled.",
+                },
+            )
+        cohort = generate_synthetic_cohort(40)
+    else:
+        cohort = req.cohort
+
     model_out = run_baseline_models(cohort)
     question = req.question or (
         f"Summarize the relationship between eGFR, A1c, and CKD-related risk "
@@ -303,9 +312,8 @@ def decision_ask(req: DecisionRequest) -> DecisionResponse:
         )
 
     store = get_vector_store()
-    llm = get_llm()
+    llm = _get_llm_or_http()
     tracer = TraceLogger()
-    reranker = get_reranker()
 
     if req.use_agent:
         rag_result_raw = agent_answer(
@@ -316,17 +324,14 @@ def decision_ask(req: DecisionRequest) -> DecisionResponse:
             run_id=run_id,
             tracer=tracer,
         )
-        rag_result = _normalize_llm_result(rag_result_raw)
-        candidate_insight = rag_result["answer"]
+        rag_result = normalize_llm_answer(rag_result_raw)
+        candidate_insight = rag_result.answer
         evidence = rag_result_raw.get("evidence", [])
     else:
-        candidate_k = max(req.k, getattr(reranker, "candidate_k", req.k))
-        evidence = store.search(question, k=candidate_k)
-        evidence = reranker.rerank(question, evidence, top_k=req.k)
-
+        evidence = _retrieve_with_rerank(question, req.k)
         rag_result_raw = llm.answer_with_citations(question=question, evidence=evidence)
-        rag_result = _normalize_llm_result(rag_result_raw)
-        candidate_insight = rag_result["answer"]
+        rag_result = normalize_llm_answer(rag_result_raw)
+        candidate_insight = rag_result.answer
 
     statistical = run_statistical_checks(model_out["scored_cohort"])
     biological = run_biological_checks(candidate_insight)
@@ -357,7 +362,13 @@ def decision_ask(req: DecisionRequest) -> DecisionResponse:
         model=getattr(llm, "model_name", "unknown"),
         provider=getattr(llm, "provider_name", "unknown"),
         latency_ms=latency_ms,
-        meta={"endpoint": "/decision/ask"},
+        meta={
+            "endpoint": "/decision/ask",
+            "app_env": _app_env(),
+            "provider_error": rag_result.provider_error,
+            "validation_status": validation_summary["validation_status"],
+            "evidence_count": len(evidence),
+        },
     )
     tracer.log_retrieval(run_id=run_id, evidence=evidence)
 

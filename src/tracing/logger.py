@@ -4,8 +4,6 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from sympy import limit
-
 from sqlalchemy import create_engine, text
 
 
@@ -17,10 +15,6 @@ class TraceLogger:
       - runs: one row per API request
       - retrieval_events: retrieved chunks per run
       - tool_events: tool calls per run
-
-    Important:
-    psycopg2 cannot directly insert Python dict/list objects into Postgres.
-    So all JSON-like payloads are serialized with json.dumps(...).
     """
 
     def __init__(self) -> None:
@@ -29,10 +23,6 @@ class TraceLogger:
 
     @staticmethod
     def _json(value: Optional[Any]) -> str:
-        """
-        Convert dictionaries/lists/scalars into a JSON string
-        safe for insertion into JSON/JSONB/TEXT columns.
-        """
         return json.dumps(value if value is not None else {}, default=str)
 
     def log_run(
@@ -44,9 +34,6 @@ class TraceLogger:
         latency_ms: int,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Log one API request/run.
-        """
         sql = text(
             """
             INSERT INTO runs (id, question, provider, model, latency_ms, meta)
@@ -68,14 +55,7 @@ class TraceLogger:
                 },
             )
 
-    def log_retrieval(
-        self,
-        run_id: str,
-        evidence: List[Dict[str, Any]],
-    ) -> None:
-        """
-        Log retrieved evidence chunks for a run.
-        """
+    def log_retrieval(self, run_id: str, evidence: List[Dict[str, Any]]) -> None:
         if not evidence:
             return
 
@@ -96,7 +76,6 @@ class TraceLogger:
                     "vector_score": item.get("vector_score"),
                     "rerank_score": item.get("rerank_score"),
                 }
-
                 conn.execute(
                     sql,
                     {
@@ -116,9 +95,6 @@ class TraceLogger:
         inputs: Optional[Dict[str, Any]] = None,
         outputs: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Log one tool call in the agent workflow.
-        """
         sql = text(
             """
             INSERT INTO tool_events
@@ -140,9 +116,6 @@ class TraceLogger:
             )
 
     def recent_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Fetch recent API runs.
-        """
         sql = text(
             """
             SELECT id, question, provider, model, latency_ms, meta, created_at
@@ -167,8 +140,6 @@ class TraceLogger:
             }
             for r in rows
         ]
+
     def get_recent_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Backward-compatible alias used by the FastAPI route.
-        """
         return self.recent_runs(limit=limit)

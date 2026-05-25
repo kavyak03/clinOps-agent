@@ -1,0 +1,5 @@
+{
+  "citations_or_refusal_rate": 0.8,
+  "refusal_accuracy": 0.8,
+  "max_avg_latency_ms": 5000
+}

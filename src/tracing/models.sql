@@ -26,8 +26,10 @@ CREATE TABLE IF NOT EXISTS retrieval_events (
   id BIGSERIAL PRIMARY KEY,
   run_id UUID NOT NULL,
   doc_id TEXT,
+  title TEXT,
   score DOUBLE PRECISION,
   rank INT,
+  metadata JSONB,
   created_at TIMESTAMP DEFAULT now()
 );
 
