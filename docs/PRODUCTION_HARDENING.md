@@ -1,6 +1,6 @@
 # Production Hardening Notes
 
-This repository is still a portfolio / research-grade biomedical AI system, but it now includes several production-minded safeguards.
+This repository is still a research-grade biomedical AI system, but it includes several production-minded safeguards.
 
 ## Implemented hardening
 
@@ -83,7 +83,7 @@ This prevents accidental decision outputs based on demo/synthetic data.
 
 ## Still not production-complete
 
-Before real deployment, add:
+Here are some suggested additions before real deployment:
 - full authentication and authorization
 - PHI redaction before logging
 - database migrations
